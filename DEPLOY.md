@@ -16,6 +16,17 @@
 
 ## 平台推荐
 
+### 0. 腾讯云 / 阿里云轻量服务器（国内玩家首选，有持久磁盘 + 不休眠）
+
+面向国内玩家，**推荐腾讯云轻量（香港节点）**：访问快、免备案、真持久磁盘（数据不丢、永不休眠）。完整图文教程见 **[deploy/tencent-cloud.md](./deploy/tencent-cloud.md)**，服务器上一键脚本 **[deploy/deploy.sh](./deploy/deploy.sh)**。
+
+要点：
+
+- 地域选**香港**（免备案、国内访问快）
+- 系统选 **Ubuntu 22.04**，SSH 登录后跑 `deploy/deploy.sh` 一键部署
+- 服务器防火墙放行 `50865` 端口
+- 服主账号：先在游戏注册，再设环境变量 `ADMIN_USERS` 重启
+
 ### 1. Render（推荐，免费 Web Service）
 
 1. 推送代码到 GitHub 仓库
