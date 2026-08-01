@@ -1,0 +1,626 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, user-scalable=no"
+    />
+    <title>🦌 荣耀赛鹿 · 多人竞技</title>
+    <link rel="stylesheet" href="/css/style.css" />
+  </head>
+  <body>
+    <!-- 离屏登录表单：始终渲染（非 display:none），让浏览器密码管理器能识别并
+         在登录弹窗内自动填充。视觉隐藏，不干扰页面 -->
+    <form
+      class="offscreen-login"
+      aria-hidden="true"
+      tabindex="-1"
+      autocomplete="on"
+    >
+      <input
+        id="pmUsername"
+        name="username"
+        type="text"
+        autocomplete="username"
+      />
+      <input
+        id="pmPassword"
+        name="password"
+        type="password"
+        autocomplete="current-password"
+      />
+    </form>
+    <div class="app">
+      <!-- 顶部栏：左侧Logo，右侧账号入口 -->
+      <div class="header">
+        <div class="logo">
+          <span class="logo-deer">🦌</span> <span class="grad">荣耀赛鹿</span>
+        </div>
+        <div class="header-right">
+          <div class="gold-display" id="goldDisplay" style="display: none">
+            🪙 <span id="goldAmt">0</span>
+          </div>
+          <div class="auth-area" id="authArea">
+            <button
+              class="btn btn-sm btn-ghost"
+              id="btnLogin"
+              onclick="openAuth('login')"
+            >
+              登录
+            </button>
+            <button
+              class="btn btn-sm btn-gold"
+              id="btnRegister"
+              onclick="openAuth('register')"
+            >
+              注册
+            </button>
+            <button
+              class="user-chip btn btn-sm"
+              id="btnUser"
+              style="display: none"
+              onclick="openProfile()"
+            >
+              👤 <span id="userNameText">-</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- ===== 大厅界面（默认）===== -->
+      <div id="view-lobby" class="lobby">
+        <!-- 品牌区 / 全服比赛直播 -->
+        <div class="card lobby-hero" id="heroCard">
+          <!-- 品牌内容（无比赛播放时显示） -->
+          <div class="hero-brand" id="heroBrand">
+            <div class="hero-logo">🦌</div>
+            <h1 class="grad">荣耀赛鹿</h1>
+            <p>驯养神鹿 · 多人同场竞技 · 下注争冠</p>
+          </div>
+          <!-- 直播容器（有比赛播放时显示，视角自动轮换） -->
+          <div class="hero-live" id="heroLive" style="display: none">
+            <div class="track-live" id="heroLiveContainer">
+              <div class="track-surface" id="heroSurface"></div>
+            </div>
+            <div class="hero-room-tag" id="heroRoomTag">-</div>
+            <div class="hero-live-badge">全服直播</div>
+          </div>
+        </div>
+
+        <!-- 两大栏入口：创建房间 / 加入房间 -->
+        <div class="lobby-actions">
+          <button class="big-action create" onclick="openCreateRoom()">
+            <span class="big-icon">🏠</span>
+            <span class="big-title">创建房间</span>
+            <span class="big-sub">开一局，邀好友同场竞技</span>
+          </button>
+          <button class="big-action join" onclick="openJoinRoom()">
+            <span class="big-icon">🚪</span>
+            <span class="big-title">加入房间</span>
+            <span class="big-sub">输入房间ID，加入比赛</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- ===== 房间界面（创建/加入后）===== -->
+      <div
+        id="view-room"
+        style="display: none; flex-direction: column; gap: 14px"
+      >
+        <!-- 房间顶部信息栏 -->
+        <div class="card room-topbar">
+          <div class="room-id-box" id="roomIdBox" title="点击复制房间ID">
+            <span class="room-id-label">房间</span>
+            <b id="roomIdText">-</b>
+          </div>
+          <div class="room-name-edit">
+            <input class="input-field" id="roomNameInput" style="width: 100%" />
+            <button
+              class="btn btn-sm"
+              id="renameRoomBtn"
+              onclick="renameRoom()"
+              style="display: none"
+            >
+              改名
+            </button>
+          </div>
+          <button
+            class="btn btn-sm btn-danger"
+            id="leaveRoomBtn"
+            onclick="leaveRoom()"
+          >
+            退出房间
+          </button>
+        </div>
+
+        <!-- 房间主体：主区 + 右侧栏（聊天 / 玩家 垂直堆叠，桌面端并排，手机端上下） -->
+        <div class="room-body">
+          <div class="room-main">
+            <!-- 主菜单标签 -->
+            <div class="tabs">
+              <button class="tab-btn active" data-tab="deer">鹿舍</button>
+              <button class="tab-btn" data-tab="shop">商店</button>
+              <button class="tab-btn" data-tab="race">赛场比赛</button>
+            </div>
+
+            <!-- 鹿舍面板 -->
+            <div id="panel-deer" class="panel">
+              <div class="stable-head">
+                <div class="section-title" style="margin: 0">我的鹿舍</div>
+                <div class="stable-view-toggle">
+                  <button
+                    class="view-toggle-btn active"
+                    data-view="card"
+                    onclick="switchStableView('card')"
+                  >
+                    卡片
+                  </button>
+                  <button
+                    class="view-toggle-btn"
+                    data-view="paddock"
+                    onclick="switchStableView('paddock')"
+                  >
+                    鹿圈
+                  </button>
+                </div>
+              </div>
+              <div class="stable-layout">
+                <div class="stable-left">
+                  <div class="grid" id="deerGrid"></div>
+                  <!-- 鹿圈：功能栏在容器上方，鹿在下方区域活动（避免遮挡） -->
+                  <div
+                    class="paddock-wrap"
+                    id="paddockWrap"
+                    style="display: none"
+                  >
+                    <div class="paddock-bar" id="paddockBar"></div>
+                    <div class="paddock" id="deerPaddock">
+                      <div class="paddock-tip">
+                        点击鹿抓住它；抓住后再点另一只鹿可配种；鹿茸成熟后收割换金币
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                <div class="stable-detail card" id="deerDetail"></div>
+              </div>
+            </div>
+            <!-- 商店面板（购买 / 出租市场两个子视图，头部布局与鹿舍统一：标题左 + 切换右） -->
+            <div id="panel-shop" class="panel" style="display: none">
+              <div class="stable-head">
+                <div class="section-title" style="margin: 0">
+                  商店 <span class="shop-timer" id="shopTimer"></span>
+                </div>
+                <div class="shop-head-actions">
+                  <button
+                    class="btn btn-sm btn-ghost"
+                    id="refreshShopBtn"
+                    onclick="refreshShop()"
+                  >
+                    🔄 刷新货架
+                  </button>
+                  <div class="stable-view-toggle">
+                    <button
+                      class="view-toggle-btn active"
+                      data-view="buy"
+                      onclick="switchShopView('buy')"
+                    >
+                      购买
+                    </button>
+                    <button
+                      class="view-toggle-btn"
+                      data-view="rent"
+                      onclick="switchShopView('rent')"
+                    >
+                      出租市场
+                    </button>
+                  </div>
+                </div>
+              </div>
+              <div class="grid" id="shopGrid"></div>
+              <div class="grid" id="rentalGrid" style="display: none"></div>
+            </div>
+            <!-- 比赛面板 -->
+            <div id="panel-race" class="panel" style="display: none">
+              <div class="section-title">比赛准备</div>
+              <div class="race-setup" id="raceSetup">
+                <div class="form-row" id="raceTypeRow">
+                  <label for="raceTypeSelect">比赛类型</label>
+                  <select
+                    id="raceTypeSelect"
+                    class="input-field"
+                    title="短距赛 · 比拼速度"
+                    onchange="setRaceTypeSelect(this.value)"
+                  >
+                    <option value="sprint">短距</option>
+                    <option value="endurance">耐力</option>
+                    <option value="obstacle">障碍</option>
+                  </select>
+                </div>
+                <div class="form-row" id="betCountdownRow">
+                  <label for="betCountdownInput">投注倒计时</label>
+                  <input
+                    type="number"
+                    id="betCountdownInput"
+                    class="input-field"
+                    min="1"
+                    max="199"
+                    value="15"
+                  />
+                  <button class="btn btn-sm" onclick="setBetCountdown()">
+                    应用
+                  </button>
+                </div>
+              </div>
+              <div class="race-actions">
+                <button
+                  class="btn btn-green"
+                  id="readyBtn"
+                  onclick="toggleReady()"
+                >
+                  我准备好了
+                </button>
+                <button
+                  class="btn btn-gold"
+                  id="startRaceBtn"
+                  style="display: none"
+                  onclick="requestStartRace()"
+                >
+                  开始比赛
+                </button>
+                <span class="bet-timer" id="betTimer" style="display: none">
+                  投注倒计时 <span class="num" id="betTimerNum">15</span>s
+                </span>
+              </div>
+              <div class="hint" id="readyHint" style="margin-bottom: 8px"></div>
+              <div
+                class="track-wrapper"
+                id="trackContainer"
+                style="display: none"
+              >
+                <div class="track-surface" id="trackSurface"></div>
+              </div>
+              <div id="raceStatus" class="race-status-text"></div>
+              <div
+                class="result-box"
+                id="resultBox"
+                style="display: none"
+              ></div>
+              <!-- 投注区域 -->
+              <div class="bet-panel" id="betPanel" style="display: none">
+                <h3>实时投注</h3>
+                <!-- 投注类型选择 -->
+                <div class="bet-types" id="betTypes">
+                  <button
+                    class="bet-type-btn active"
+                    data-type="win"
+                    onclick="setBetType('win')"
+                  >
+                    独赢
+                  </button>
+                  <button
+                    class="bet-type-btn"
+                    data-type="place"
+                    onclick="setBetType('place')"
+                  >
+                    位置
+                  </button>
+                  <button
+                    class="bet-type-btn"
+                    data-type="quinella"
+                    onclick="setBetType('quinella')"
+                  >
+                    连赢
+                  </button>
+                  <button
+                    class="bet-type-btn"
+                    data-type="trifecta"
+                    onclick="setBetType('trifecta')"
+                  >
+                    三重彩
+                  </button>
+                </div>
+                <div class="bet-type-hint" id="betTypeHint"></div>
+                <div id="betOptions"></div>
+                <div
+                  style="
+                    margin-top: 6px;
+                    display: flex;
+                    gap: 8px;
+                    align-items: center;
+                    flex-wrap: wrap;
+                  "
+                >
+                  <input
+                    type="number"
+                    class="input-field"
+                    id="betAmount"
+                    value="50"
+                    min="10"
+                    max="99999"
+                    style="width: 100px"
+                  />
+                  <button
+                    class="btn btn-gold"
+                    id="betSubmitBtn"
+                    onclick="placeBet()"
+                  >
+                    确认投注
+                  </button>
+                </div>
+                <div class="hint" id="myBetInfo" style="margin-top: 6px"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 右侧栏：聊天 + 玩家/排行榜 垂直堆叠（桌面端在主区右侧） -->
+          <div class="room-side">
+            <!-- 聊天侧栏（可折叠 · 房间 / 通告双频道） -->
+            <aside class="room-chat card" id="chatSidebar">
+              <div class="chat-header">
+                <span class="chat-title">聊天</span>
+                <div class="stable-view-toggle chat-tabs">
+                  <button
+                    class="view-toggle-btn active"
+                    data-chat="room"
+                    onclick="switchChatTab('room')"
+                  >
+                    房间
+                  </button>
+                  <button
+                    class="view-toggle-btn"
+                    data-chat="global"
+                    onclick="switchChatTab('global')"
+                  >
+                    通告
+                  </button>
+                </div>
+                <button class="btn btn-sm btn-ghost" id="chatToggle">
+                  收起
+                </button>
+              </div>
+              <div class="chat-box">
+                <div class="chat-msgs" id="chatMsgs"></div>
+                <div
+                  class="chat-msgs"
+                  id="globalChatMsgs"
+                  style="display: none"
+                ></div>
+                <div class="chat-input-row">
+                  <input
+                    class="input-field"
+                    id="chatInput"
+                    placeholder="说点什么..."
+                    maxlength="100"
+                  />
+                  <button
+                    class="btn btn-blue btn-sm"
+                    id="chatSendBtn"
+                    onclick="sendChat()"
+                  >
+                    发送
+                  </button>
+                </div>
+              </div>
+            </aside>
+
+            <!-- 玩家列表 + 排行榜侧栏（可折叠） -->
+            <aside class="room-chat card" id="playerSidebar">
+              <div class="chat-header">
+                <span class="chat-title"
+                  >玩家
+                  <span class="player-count-num" id="playerCount">0</span></span
+                >
+                <button class="btn btn-sm btn-ghost" id="playerToggle">
+                  收起
+                </button>
+              </div>
+              <div class="chat-box">
+                <div class="chat-msgs sidebar-panel">
+                  <div class="section-title">玩家列表</div>
+                  <div class="player-list" id="playerList"></div>
+                  <div class="section-title">排行榜</div>
+                  <div id="leaderboard"></div>
+                </div>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ===== 通用模态框 ===== -->
+    <!-- 登录 / 注册 -->
+    <div
+      class="modal-mask"
+      id="modalAuth"
+      onclick="closeModalOnMask(event, 'modalAuth')"
+    >
+      <div class="modal">
+        <button class="modal-close" onclick="closeModal('modalAuth')">✕</button>
+        <div class="modal-title" id="authModalTitle">登录</div>
+        <div class="auth-tabs">
+          <button
+            class="auth-tab active"
+            id="authTabLogin"
+            onclick="setAuthMode('login')"
+          >
+            登录
+          </button>
+          <button
+            class="auth-tab"
+            id="authTabRegister"
+            onclick="setAuthMode('register')"
+          >
+            注册
+          </button>
+        </div>
+        <div class="auth-body">
+          <!-- form 包裹 + name/autocomplete 属性：适配浏览器密码保存器 -->
+          <form
+            id="authForm"
+            action=""
+            method="post"
+            autocomplete="on"
+            onsubmit="
+              event.preventDefault();
+              doAuth();
+            "
+          >
+            <input
+              class="input-field auth-input"
+              id="accUser"
+              placeholder="用户名"
+              maxlength="12"
+              name="username"
+              autocomplete="username"
+            />
+            <input
+              class="input-field auth-input"
+              id="accPass"
+              placeholder="密码"
+              type="password"
+              maxlength="20"
+              name="password"
+              autocomplete="current-password"
+            />
+            <button
+              class="btn btn-gold btn-block"
+              id="authSubmit"
+              type="submit"
+            >
+              登录
+            </button>
+          </form>
+        </div>
+      </div>
+    </div>
+
+    <!-- 玩家资料 -->
+    <div
+      class="modal-mask"
+      id="modalProfile"
+      onclick="closeModalOnMask(event, 'modalProfile')"
+    >
+      <div class="modal">
+        <button class="modal-close" onclick="closeModal('modalProfile')">
+          ✕
+        </button>
+        <div class="modal-title">我的资料</div>
+        <div class="profile-row">
+          <span class="profile-label">账号</span>
+          <b id="profileUser">-</b>
+        </div>
+        <div class="profile-row">
+          <span class="profile-label">资产</span>
+          <span
+            >🪙 <b id="profileGold">0</b> 金币 · 🏆
+            <b id="profileWins">0</b> 胜</span
+          >
+        </div>
+        <div class="section-title">修改昵称</div>
+        <div class="room-panel">
+          <input
+            class="input-field"
+            id="playerName"
+            placeholder="输入你的昵称"
+            value="鹿友"
+            maxlength="12"
+          />
+          <button class="btn" onclick="saveName()">保存</button>
+        </div>
+        <div class="section-title">修改密码</div>
+        <div class="change-pass-panel">
+          <input
+            class="input-field"
+            id="oldPassInput"
+            type="password"
+            placeholder="当前密码"
+            autocomplete="current-password"
+          />
+          <input
+            class="input-field"
+            id="newPassInput"
+            type="password"
+            placeholder="新密码（至少4位）"
+            autocomplete="new-password"
+          />
+          <button class="btn" onclick="changePassword()">修改密码</button>
+        </div>
+        <div class="id-line">
+          我的ID: <b id="myPlayerId" class="my-id" onclick="copyMyId()">-</b>
+        </div>
+        <button
+          class="btn btn-danger btn-block"
+          onclick="doLogout()"
+          style="margin-top: 12px"
+        >
+          退出登录
+        </button>
+      </div>
+    </div>
+
+    <!-- 创建房间 -->
+    <div
+      class="modal-mask"
+      id="modalCreate"
+      onclick="closeModalOnMask(event, 'modalCreate')"
+    >
+      <div class="modal">
+        <button class="modal-close" onclick="closeModal('modalCreate')">
+          ✕
+        </button>
+        <div class="modal-title">创建房间</div>
+        <input
+          class="input-field modal-input"
+          id="newRoomName"
+          placeholder="房间名（可留空）"
+          maxlength="16"
+        />
+        <button class="btn btn-gold btn-block" onclick="createRoom()">
+          创建房间
+        </button>
+      </div>
+    </div>
+
+    <!-- 加入房间 -->
+    <div
+      class="modal-mask"
+      id="modalJoin"
+      onclick="closeModalOnMask(event, 'modalJoin')"
+    >
+      <div class="modal">
+        <button class="modal-close" onclick="closeModal('modalJoin')">✕</button>
+        <div class="modal-title">加入房间</div>
+        <input
+          class="input-field modal-input"
+          id="roomIdInput"
+          placeholder="输入房间ID"
+          maxlength="6"
+          autocomplete="off"
+        />
+        <button class="btn btn-green btn-block" onclick="joinRoom()">
+          加入房间
+        </button>
+      </div>
+    </div>
+
+    <!-- 模块化脚本（类似小程序架构：app + 各页面模块） -->
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/game-config.js"></script>
+    <script src="/js/app.js"></script>
+    <script src="/js/account.js"></script>
+    <script src="/js/lobby.js"></script>
+    <script src="/js/room.js"></script>
+    <script src="/js/live-view.js"></script>
+    <script src="/js/deer-card.js"></script>
+    <script src="/js/race.js"></script>
+    <script src="/js/rental.js"></script>
+    <script src="/js/hero.js"></script>
+    <script>
+      // 启动入口（相当于小程序的 app.onLaunch）
+      Game.initUI();
+      Game.connect();
+    </script>
+  </body>
+</html>
