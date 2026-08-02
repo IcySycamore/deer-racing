@@ -721,6 +721,10 @@
     // 同步比赛类型下拉框（以服务器为准）
     const typeSel = document.getElementById("raceTypeSelect");
     if (typeSel && G.room.raceType) typeSel.value = G.room.raceType;
+    // 同步比赛参数输入（以服务器 raceConfig 为准；非房主或比赛中也同步显示当前值）
+    syncRaceConfigInputs();
+    // 按类型显隐参数行：平直=赛道长；跑圈=圈数；山坡=角度+登顶距离
+    toggleRaceConfigRows(G.room.raceType);
 
     const readyBtn = document.getElementById("readyBtn");
     const startBtn = document.getElementById("startRaceBtn");
@@ -897,6 +901,7 @@
     if (!G.room || G.room.host !== G.myId) return;
     if (!GameConfig.RACE_TYPES.includes(type)) return;
     G.selectedRaceType = type;
+    toggleRaceConfigRows(type);
     G.socket.emit("setRaceType", { type });
   };
 
@@ -912,6 +917,58 @@
       );
     }
     G.socket.emit("setBetCountdown", { seconds: s });
+  };
+
+  // 同步比赛参数输入框（以服务器 raceConfig 为准）
+  function syncRaceConfigInputs() {
+    const cfg =
+      (G.room && G.room.raceConfig) || GameConfig.normalizeRaceConfig({});
+    const set = (id, v) => {
+      const el = document.getElementById(id);
+      if (el) el.value = v;
+    };
+    set("raceLanesInput", cfg.lanes);
+    set("raceDeerInput", cfg.deerCount);
+    set("raceTrackLenInput", cfg.trackLen);
+    set("raceLapsInput", cfg.laps);
+    set("raceAngleInput", cfg.angle);
+    set("raceSummitInput", cfg.summit);
+  }
+
+  // 按比赛类型显隐参数行
+  function toggleRaceConfigRows(type) {
+    const show = (id, on) => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = on ? "flex" : "none";
+    };
+    show(
+      "trackLenRow",
+      type === "sprint" || type === "endurance" || type === "obstacle",
+    );
+    show("lapsRow", type === "lap");
+    show("hillAngleRow", type === "hill");
+    show("hillSummitRow", type === "hill");
+  }
+
+  // 房主应用比赛参数（鹿数/赛道数/赛道长/圈数/角度/登顶距离）
+  window.applyRaceConfig = () => {
+    if (!G.room || G.room.host !== G.myId) return;
+    // 类型从下拉框取（避免依赖服务器回显时序）
+    const typeSel = document.getElementById("raceTypeSelect");
+    const type = typeSel ? typeSel.value : G.room.raceType || "sprint";
+    const num = (id) => {
+      const el = document.getElementById(id);
+      return el ? Number(el.value) : undefined;
+    };
+    G.socket.emit("setRaceConfig", {
+      type,
+      lanes: num("raceLanesInput"),
+      deerCount: num("raceDeerInput"),
+      trackLen: num("raceTrackLenInput"),
+      laps: num("raceLapsInput"),
+      angle: num("raceAngleInput"),
+      summit: num("raceSummitInput"),
+    });
   };
 
   window.requestStartRace = () => {

@@ -114,7 +114,9 @@
             />
           </div>
           <div class="roomlist-body" id="roomListBody">
-            <div class="roomlist-empty">暂无公开房间，点击上方「创建房间」开始</div>
+            <div class="roomlist-empty">
+              暂无公开房间，点击上方「创建房间」开始
+            </div>
           </div>
         </div>
       </div>
@@ -245,13 +247,88 @@
                   <select
                     id="raceTypeSelect"
                     class="input-field"
-                    title="短距赛 · 比拼速度"
+                    title="短距 · 比拼速度 / 耐力 / 障碍 / 爬坡登顶夺旗 / 跑圈"
                     onchange="setRaceTypeSelect(this.value)"
                   >
                     <option value="sprint">短距</option>
                     <option value="endurance">耐力</option>
                     <option value="obstacle">障碍</option>
+                    <option value="hill">山坡</option>
+                    <option value="lap">跑圈</option>
                   </select>
+                </div>
+                <!-- 比赛参数配置（需求4/5：鹿数/赛道数/赛道长/圈数/角度/登顶距离，0<鹿数<赛道数<10） -->
+                <div class="form-row">
+                  <label for="raceLanesInput">赛道数</label>
+                  <input
+                    type="number"
+                    id="raceLanesInput"
+                    class="input-field"
+                    min="2"
+                    max="9"
+                    value="6"
+                    title="赛道（车道）数量 2~9"
+                  />
+                </div>
+                <div class="form-row">
+                  <label for="raceDeerInput">参赛鹿数</label>
+                  <input
+                    type="number"
+                    id="raceDeerInput"
+                    class="input-field"
+                    min="2"
+                    max="8"
+                    value="6"
+                    title="参赛鹿数 2~8（房间不足用 AI 补齐，恒小于赛道数）"
+                  />
+                </div>
+                <div class="form-row" id="trackLenRow">
+                  <label for="raceTrackLenInput">赛道长</label>
+                  <input
+                    type="number"
+                    id="raceTrackLenInput"
+                    class="input-field"
+                    min="100"
+                    max="15000"
+                    value="125"
+                    title="平直赛道长度 100~15000（仅短距/耐力/障碍生效）"
+                  />
+                </div>
+                <div class="form-row" id="lapsRow" style="display: none">
+                  <label for="raceLapsInput">圈数</label>
+                  <input
+                    type="number"
+                    id="raceLapsInput"
+                    class="input-field"
+                    min="1"
+                    max="20"
+                    value="3"
+                    title="跑圈圈数 1~20（单圈固定 400，按标准体育场）"
+                  />
+                </div>
+                <div class="form-row" id="hillAngleRow" style="display: none">
+                  <label for="raceAngleInput">坡度角</label>
+                  <input
+                    type="number"
+                    id="raceAngleInput"
+                    class="input-field"
+                    min="5"
+                    max="45"
+                    value="15"
+                    title="山坡坡度角 5~45°"
+                  />
+                </div>
+                <div class="form-row" id="hillSummitRow" style="display: none">
+                  <label for="raceSummitInput">登顶距离</label>
+                  <input
+                    type="number"
+                    id="raceSummitInput"
+                    class="input-field"
+                    min="100"
+                    max="5000"
+                    value="800"
+                    title="登顶距离 100~5000"
+                  />
                 </div>
                 <div class="form-row" id="betCountdownRow">
                   <label for="betCountdownInput">投注倒计时</label>
@@ -265,6 +342,11 @@
                   />
                   <button class="btn btn-sm" onclick="setBetCountdown()">
                     应用
+                  </button>
+                </div>
+                <div class="form-row">
+                  <button class="btn btn-sm" onclick="applyRaceConfig()">
+                    应用比赛参数
                   </button>
                 </div>
               </div>
@@ -607,9 +689,7 @@
         </label>
         <!-- 公开/私密开关：公开房进大厅列表，私密房仅凭房间号加入 -->
         <label class="create-option toggle-row">
-          <span class="create-option-label">
-            公开房间
-          </span>
+          <span class="create-option-label"> 公开房间 </span>
           <input
             type="checkbox"
             class="toggle-input"
@@ -647,6 +727,8 @@
 
     <!-- 模块化脚本（类似小程序架构：app + 各页面模块） -->
     <script src="/socket.io/socket.io.js"></script>
+    <script src="/js/game-values.js"></script>
+    <script src="/js/game-formulas.js"></script>
     <script src="/js/game-config.js"></script>
     <script src="/js/app.js"></script>
     <script src="/js/account.js"></script>

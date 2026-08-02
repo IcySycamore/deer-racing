@@ -8,6 +8,8 @@ const fs = require("fs");
 const GameConfig = require(
   path.join(__dirname, "public", "js", "game-config.js"),
 );
+// 公式库（与前端同源）：rollCapsAndAttrs / generateTrackObjects / staticOdds ...
+const F = GameConfig.GameFormulas;
 // 数据目录：托管平台设 DATA_DIR 指向持久化卷；本地默认项目根目录
 const DATA_DIR = process.env.DATA_DIR || __dirname;
 if (process.env.DATA_DIR && !fs.existsSync(DATA_DIR)) {
@@ -45,8 +47,8 @@ app.use(express.static(path.join(__dirname, "public")));
 
 const rooms = {};
 
-// 房间人数上限：与跑道数一致（满员后不能加入）
-const MAX_PLAYERS = GameConfig.LANES;
+// 房间人数上限：与参赛鹿数上限一致（满员后不能加入）
+const MAX_PLAYERS = GameConfig.DEER.max;
 
 // 全局出租市场（跨房间）：玩家挂出鹿出租给 AI 或其他玩家，每场结算租金
 // market item: { id, deer(完整对象含真实属性), ownerId, ownerName, ownerAccount,
@@ -196,6 +198,7 @@ function roomView(room) {
     maxPlayers: room.maxPlayers || MAX_PLAYERS,
     isPublic: room.isPublic !== false,
     raceType: room.raceType || "sprint",
+    raceConfig: room.raceConfig || GameConfig.normalizeRaceConfig({}),
     betCountdown: room.betCountdown || GameConfig.BET_COUNTDOWN,
     players: roster,
     leaderboard,
@@ -212,18 +215,21 @@ function roomView(room) {
 
 // 比赛公开状态：不暴露真实属性，只暴露参赛鹿的公开信息、赔率、投注池与赛道物件计划
 function publicRaceState(rs) {
-  // 赛道物件内部坐标是 0~TRACK_LEN，广播给前端统一归一化回 0~100
-  const sc = GameConfig.trackScale;
+  // 赛道物件内部坐标是 0~有效赛道长，广播给前端统一归一化回 0~100
+  const len = rs.config
+    ? GameConfig.effectiveTrackLen(rs.config)
+    : GameConfig.TRACK_LEN;
   return {
     type: rs.type,
     status: rs.status,
+    config: rs.config || GameConfig.normalizeRaceConfig({}),
     odds: rs.odds,
     betPool: rs.betPool || {}, // 每只鹿的实时累计投注金额（动态赔率依据）
     finishOrder: rs.finishOrder,
     trackObjects: (rs.trackObjects || []).map((o) => ({
       ...o,
-      pos: GameConfig.trackScale(o.pos),
-      renderPos: GameConfig.trackScale(o.renderPos),
+      pos: GameConfig.trackScale(o.pos, len),
+      renderPos: GameConfig.trackScale(o.renderPos, len),
     })),
     racers: rs.racers.map((r) => ({
       deer: publicDeer(r.deer),
@@ -379,21 +385,9 @@ function deerFullName(d) {
 }
 
 function randomDeer(quality) {
-  const ranges = {
-    1: [18, 35],
-    2: [28, 50],
-    3: [42, 65],
-    4: [58, 80],
-    5: [72, 95],
-  };
-  const r = ranges[quality];
+  const r = F.rollCapsAndAttrs(quality); // 品质 -> 属性 + 潜力上限（公式库）
   const titles = ELEGANT_TITLES[quality];
-  // 每个鹿的属性上限不同（潜力随机）：品质越高，上限浮动越大
-  // 上限 = 品质基准上限 + 随机浮动（6~14），决定了这头鹿能练到多高
-  const capVar = 4 + quality * 2;
-  const mkCap = () => Math.min(99, Math.round(r[1] + Math.random() * capVar));
-  const caps = { speed: mkCap(), stamina: mkCap(), agility: mkCap() };
-  const mk = (cap) => Math.floor(Math.random() * (cap - r[0] + 1)) + r[0];
+  const caps = r.caps;
   return {
     id: Date.now().toString(36) + Math.random().toString(36).substr(2, 4),
     name: NAMES[Math.floor(Math.random() * NAMES.length)],
@@ -401,9 +395,9 @@ function randomDeer(quality) {
     quality,
     // 价格在创建时从品质范围内随机取定，客户端只见固定价格
     price: quality * 200 + Math.floor(Math.random() * 100),
-    speed: mk(caps.speed),
-    stamina: mk(caps.stamina),
-    agility: mk(caps.agility),
+    speed: r.speed,
+    stamina: r.stamina,
+    agility: r.agility,
     caps, // 属性上限（每头鹿不同）：训练/老去都受此约束
     desc: QUALITY_DESC[quality].desc,
     owner: null,
@@ -436,99 +430,17 @@ function sellPriceFor(deer) {
 function generateShop() {
   const shop = [];
   for (let i = 0; i < 4; i++) {
-    const roll = Math.random();
-    let q =
-      roll < 0.35 ? 1 : roll < 0.6 ? 2 : roll < 0.8 ? 3 : roll < 0.93 ? 4 : 5;
+    const q = F.rollQuality(); // 品质分布（公式库，读 SHOP_QUALITY）
     shop.push(randomDeer(q));
   }
   return shop;
 }
 
 // 生成赛道物件计划：位置固定，所有鹿经过时各自判定
-// 解决"障碍物不在那个位置却撞上"的问题
-// 比赛类型影响赛道构成：障碍赛多坑/障碍，短距赛多为草地，耐力赛均衡
-// 车道数与渲染位移来自共享 GameConfig（与前端一致）
-const LANES = GameConfig.LANES;
-const RENDER_OFFSET = GameConfig.RENDER_OFFSET;
-
-// 生成赛道物件计划：位置固定，所有鹿经过时各自判定
-// 解决"障碍物不在那个位置却撞上"的问题
-// 比赛类型影响赛道构成：
-//  - 障碍赛：物体在所有车道上都生成（洞/障碍/草混合）
-//  - 短距/耐力：物体随机分散在部分车道（1~5 条）和不同距离上
-function generateTrackObjects(type) {
-  const objs = [];
-  const isObstacle = type === "obstacle";
-  const isSprint = type === "sprint";
-  const T = GameConfig.TRACK_LEN; // 赛道总长（内部坐标）
-  const END = T - 14; // 物件最晚位置（留出终点缓冲）
-  let pos = T * 0.12;
-  while (pos < END) {
-    // 间隔：障碍赛密集，短距赛稀疏（按赛道长度比例缩放）
-    const gap = isObstacle
-      ? T * 0.05 + Math.random() * T * 0.06
-      : isSprint
-        ? T * 0.1 + Math.random() * T * 0.08
-        : T * 0.07 + Math.random() * T * 0.09;
-    pos += gap;
-    if (pos >= END) break;
-    let t;
-    const roll = Math.random();
-    if (isObstacle) {
-      // 障碍赛：坑 40% / 障碍 35% / 草 25%
-      t = roll < 0.4 ? "hole" : roll < 0.75 ? "obstacle" : "grass";
-    } else if (isSprint) {
-      // 短距赛：草 60% / 障碍 25% / 坑 15%
-      t = roll < 0.15 ? "hole" : roll < 0.4 ? "obstacle" : "grass";
-    } else {
-      // 耐力赛：三种均等
-      t = ["hole", "obstacle", "grass"][Math.floor(Math.random() * 3)];
-    }
-    if (isObstacle) {
-      // 障碍赛：物体在所有车道上都生成
-      for (let lane = 0; lane < LANES; lane++) {
-        objs.push({
-          pos: Math.round(pos), // 判定点位置（鹿到此判定）
-          type: t,
-          lane,
-          renderPos: Math.round(pos) + RENDER_OFFSET, // 物件渲染位置 = 判定点 + 固定位移
-        });
-      }
-    } else {
-      // 短距/耐力：随机选 1~5 条车道分散生成
-      const all = [0, 1, 2, 3, 4, 5];
-      const lanes = [];
-      const laneCount = 1 + Math.floor(Math.random() * 5);
-      for (let k = 0; k < laneCount; k++) {
-        const idx = Math.floor(Math.random() * all.length);
-        lanes.push(all.splice(idx, 1)[0]);
-      }
-      for (const lane of lanes) {
-        objs.push({
-          pos: Math.round(pos), // 判定点位置（鹿到此判定）
-          type: t,
-          lane,
-          renderPos: Math.round(pos) + RENDER_OFFSET, // 物件渲染位置 = 判定点 + 固定位移
-        });
-      }
-    }
-  }
-  // 道具点：随机 3 个（位置 25%~80%，随机车道），鹿踩到获得随机道具（加速/攻击/护盾）
-  for (let k = 0; k < 3; k++) {
-    const p = T * 0.25 + Math.floor(Math.random() * (T * 0.55));
-    objs.push({
-      pos: Math.round(p),
-      type: "powerup",
-      lane: Math.floor(Math.random() * LANES),
-      renderPos: Math.round(p) + RENDER_OFFSET,
-    });
-  }
-  return objs;
-}
-
-// 属性转星级（1-10），供"查验"功能使用
-function attrStars(v) {
-  return Math.max(1, Math.min(10, Math.round(v / 10)));
+// 委托给公式库 F.generateTrackObjects(cfg)，实现"判定点 + 判定距离"格式，
+// 车道数 lanes 来自房间比赛配置（非硬编码）
+function generateTrackObjects(cfg) {
+  return GameConfig.generateTrackObjects(cfg);
 }
 
 // 属性转星级（1-10），供"查验"功能使用（共享 GameConfig.attrStars）
@@ -613,6 +525,8 @@ io.on("connection", (socket) => {
         host: socket.id,
         hostName: playerName || "鹿主",
         raceType: "sprint",
+        // 比赛配置（房主可改）：类型/车道数/参赛鹿数/赛道长/圈数/角度/登顶距离
+        raceConfig: GameConfig.normalizeRaceConfig({}),
         maxPlayers: maxP,
         isPublic: isPublic !== false, // 默认公开，false = 仅可凭房间号加入
         players: {},
@@ -966,11 +880,13 @@ io.on("connection", (socket) => {
       broadcastViews(room);
       return;
     }
-    // 参赛鹿总数上限：全房间已选鹿数达到跑道数后不能再选（只能观战）
+    // 参赛鹿总数上限：全房间已选鹿数达到配置的参赛鹿数后不能再选（只能观战）
+    const maxDeer =
+      (room.raceConfig && room.raceConfig.deerCount) || GameConfig.DEER.default;
     const selectedCount = Object.values(room.players).filter(
       (p) => p.selectedDeerId,
     ).length;
-    if (selectedCount >= GameConfig.LANES) {
+    if (selectedCount >= maxDeer) {
       socket.emit("error", "参赛鹿数量已满，本场只能观战");
       return;
     }
@@ -1002,6 +918,24 @@ io.on("connection", (socket) => {
     if (room.raceState) return;
     if (!GameConfig.RACE_TYPES.includes(type)) return;
     room.raceType = type;
+    room.raceConfig = GameConfig.normalizeRaceConfig({
+      ...(room.raceConfig || {}),
+      type,
+    });
+    broadcastViews(room);
+  });
+
+  // 房主配置比赛参数：类型/车道数/参赛鹿数/赛道长/圈数/角度/登顶距离（比赛进行中不可改）
+  socket.on("setRaceConfig", (patch) => {
+    const room = rooms[currentRoom];
+    if (!room || room.host !== socket.id) return;
+    if (room.raceState) return;
+    const merged = GameConfig.normalizeRaceConfig({
+      ...(room.raceConfig || {}),
+      ...(patch || {}),
+    });
+    room.raceConfig = merged;
+    room.raceType = merged.type;
     broadcastViews(room);
   });
 
@@ -1062,28 +996,20 @@ io.on("connection", (socket) => {
         aiQ = Math.max(1, Math.min(5, avg + offset));
       }
     }
-    const aiCount = Math.max(6 - racers.length, 0);
+    // 参赛鹿数上限：由房间比赛配置决定（房间不足用 AI 补齐），非硬编码 6
+    const targetDeer =
+      (room.raceConfig && room.raceConfig.deerCount) || GameConfig.DEER.default;
+    const aiCount = Math.max(targetDeer - racers.length, 0);
     for (let i = 0; i < aiCount; i++) {
       const aiDeer = randomDeer(aiQ);
       racers.push({ deer: aiDeer, ownerId: null });
     }
-    // 计算隐藏赔率 (基于服务器真实属性 + 比赛类型权重，客户端不可见)
-    // 权重与比赛引擎一致：主属性权重最大，但速度/耐力/敏捷三项都参与
-    const odds = racers.map((r) => {
-      const d = r.deer;
-      const t = room.raceType || "sprint";
-      const w =
-        t === "sprint"
-          ? { speed: 0.45, agility: 0.3, stamina: 0.15 }
-          : t === "endurance"
-            ? { speed: 0.2, stamina: 0.45, agility: 0.25 }
-            : { speed: 0.25, stamina: 0.2, agility: 0.45 };
-      const score =
-        d.speed * w.speed + d.stamina * w.stamina + d.agility * w.agility;
-      return Math.max(1.5, Math.min(8.0, (60 / (score + 10)) * 3)).toFixed(1);
-    });
+    // 计算隐藏赔率（基于服务器真实属性 + 比赛类型权重，客户端不可见）
+    // 委托公式库 F.staticOdds（读 TYPE_WEIGHTS，含 hill/lap 回退 sprint）
+    const odds = F.staticOdds(racers, room.raceConfig.type);
     room.raceState = {
-      type: room.raceType || "sprint",
+      type: room.raceConfig.type,
+      config: room.raceConfig, // 存比赛配置（引擎按此生成赛道/车道/长度）
       racers,
       odds,
       baseOdds: [...odds], // 静态基准赔率（动态赔率以此为基础波动）
@@ -1091,7 +1017,7 @@ io.on("connection", (socket) => {
       bets: {},
       betPool: {}, // deerId -> 累计投注金额（实时投注量）
       finishOrder: null,
-      trackObjects: generateTrackObjects(room.raceType || "sprint"),
+      trackObjects: generateTrackObjects(room.raceConfig),
     };
     // 重置所有人的投注记录与上场比赛结算结果（避免残留影响前端 toast 判定）
     for (const p of Object.values(room.players)) {
@@ -1104,7 +1030,18 @@ io.on("connection", (socket) => {
     io.emit("worldRaceStart", {
       roomId: room.roomId,
       roomName: room.name || room.roomId,
-      trackObjects: room.raceState.trackObjects,
+      config: room.raceConfig, // 供全服直播动态车道数渲染
+      trackObjects: (room.raceState.trackObjects || []).map((o) => ({
+        ...o,
+        pos: GameConfig.trackScale(
+          o.pos,
+          GameConfig.effectiveTrackLen(room.raceConfig),
+        ),
+        renderPos: GameConfig.trackScale(
+          o.renderPos,
+          GameConfig.effectiveTrackLen(room.raceConfig),
+        ),
+      })),
       racers: racers.map((r) => ({
         deer: publicDeer(r.deer),
         ownerId: r.ownerId,
@@ -1710,12 +1647,10 @@ function startRaceSimulation(room, roomId) {
   broadcastViews(room);
 
   const racers = room.raceState.racers;
+  const cfg = room.raceState.config;
+  const len = GameConfig.effectiveTrackLen(cfg);
   // 位置步进 + 物件判定 + 名次判定收进纯引擎 race-engine.js（无 io/定时器，可单测）
-  const race = createRace(
-    racers,
-    room.raceState.type,
-    room.raceState.trackObjects,
-  );
+  const race = createRace(racers, cfg, room.raceState.trackObjects);
 
   const interval = setInterval(() => {
     // 房间已销毁（如全员退出）：立即停止模拟，不再向全服广播位置
@@ -1724,15 +1659,16 @@ function startRaceSimulation(room, roomId) {
       return;
     }
     // 推进一步，拿到本步事件流并广播（时钟与广播是引擎的 adapter）
-    // 位置在引擎内是 0~TRACK_LEN，广播给前端时统一归一化回 0~100
+    // 位置在引擎内是 0~有效赛道长，广播给前端时统一归一化回 0~100
     const events = stepRace(race);
     for (const ev of events) {
-      if (typeof ev.pos === "number") ev.pos = GameConfig.trackScale(ev.pos);
+      if (typeof ev.pos === "number")
+        ev.pos = GameConfig.trackScale(ev.pos, len);
       io.emit("raceEvent", { roomId, ...ev });
     }
     io.emit("racePositions", {
       roomId,
-      positions: race.positions.map((p) => GameConfig.trackScale(p)),
+      positions: race.positions.map((p) => GameConfig.trackScale(p, len)),
     });
     if (race.done) {
       clearInterval(interval);

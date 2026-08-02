@@ -176,7 +176,11 @@
   };
 
   // 比赛类型中文标签
-  const RACE_LABELS = { sprint: "短距赛", endurance: "耐力赛", obstacle: "障碍赛" };
+  const RACE_LABELS = {
+    sprint: "短距赛",
+    endurance: "耐力赛",
+    obstacle: "障碍赛",
+  };
   function raceTypeLabel(t) {
     return RACE_LABELS[t] || "短距赛";
   }
@@ -185,7 +189,13 @@
     return String(s == null ? "" : s).replace(
       /[&<>"']/g,
       (c) =>
-        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c],
+        ({
+          "&": "&amp;",
+          "<": "&lt;",
+          ">": "&gt;",
+          '"': "&quot;",
+          "'": "&#39;",
+        })[c],
     );
   }
 })();

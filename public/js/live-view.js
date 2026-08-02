@@ -11,8 +11,7 @@
   if (!G) return;
 
   // ===== 平直赛道参数（摄像头模式）=====
-  // 车道数与共享配置同源（服务器生成物件与前端渲染一致）
-  const LANES = GameConfig.LANES;
+  // 车道数来自比赛配置（服务器动态决定），非固定
   const LANE_TOP = 27; // 第一条跑道中线 y(%)（相对 surface）
   const LANE_GAP = 9; // 跑道间距(%)
   // surface 始终固定 300% 宽：全局视角 = scale(1/3) 收进视口；跟随视角 = translateX 平移取景
@@ -20,8 +19,14 @@
   const VIEW_RATIO = SURFACE_W / 100; // 视口占 surface 的比例（1/3）
   const SCALE_GLOBAL = 1 / VIEW_RATIO;
 
+  // 车道几何需按当前比赛的车道数动态计算（车道数 = 赛道配置 lanes）
+  let currentLanes = GameConfig.LANE.default;
+
   function laneCenter(idx) {
-    return LANE_TOP + idx * LANE_GAP;
+    // 车道中线从 8% 起，间距 9%，随车道数等比缩放（避免超 100%）
+    const usable = 100 - 2 * LANE_TOP;
+    const step = Math.min(LANE_GAP, usable / Math.max(1, currentLanes));
+    return LANE_TOP + idx * step;
   }
 
   // 把元素放到 surface 坐标的 (progress 0-100, lane) 位置
@@ -32,9 +37,10 @@
   }
 
   function placeLine(el, progress) {
+    const step = laneCenter(1) - laneCenter(0); // 跑道间距（按当前车道数）
     el.style.left = progress + "%";
-    el.style.top = laneCenter(0) - LANE_GAP / 2 + "%";
-    el.style.height = LANES * LANE_GAP + "%";
+    el.style.top = laneCenter(0) - step / 2 + "%";
+    el.style.height = currentLanes * step + "%";
   }
 
   // 把鹿放到 surface 坐标的 (progress 0-100, lane) 位置，头朝右
@@ -210,7 +216,12 @@
     view.setRace = function (rs) {
       view.racers = rs.racers;
       view.trackObjects = rs.trackObjects || [];
-      view.laneOf = view.racers.map((_, i) => i);
+      // 车道数来自比赛配置（动态），用于跑道/车道线/物件车道渲染
+      const lanes =
+        (rs.config && rs.config.lanes) ||
+        GameConfig.normalizeRaceConfig({}).lanes;
+      currentLanes = lanes;
+      view.laneOf = view.racers.map((_, i) => i % currentLanes);
       view.followIdx = 0;
       build();
       view.applyCamera();
@@ -244,15 +255,20 @@
       // 泥土跑道带（surface 全宽，跑道区域高度）
       const road = document.createElement("div");
       road.className = "track-road";
-      road.style.top = laneCenter(0) - LANE_GAP / 2 + "%";
-      road.style.height = LANES * LANE_GAP + "%";
+      road.style.top =
+        laneCenter(0) - (laneCenter(1) - laneCenter(0)) / 2 + "%";
+      road.style.height = currentLanes * (laneCenter(1) - laneCenter(0)) + "%";
       surface.appendChild(road);
 
-      // 跑道分隔线（6 条跑道的 7 条线）
-      for (let i = 0; i <= LANES; i++) {
+      // 跑道分隔线（每条跑道的分隔线，共 车道数+1 条）
+      for (let i = 0; i <= currentLanes; i++) {
         const ln = document.createElement("div");
         ln.className = "lane-line";
-        ln.style.top = laneCenter(0) - LANE_GAP / 2 + i * LANE_GAP + "%";
+        ln.style.top =
+          laneCenter(0) -
+          (laneCenter(1) - laneCenter(0)) / 2 +
+          i * (laneCenter(1) - laneCenter(0)) +
+          "%";
         surface.appendChild(ln);
       }
 
@@ -438,7 +454,6 @@
         attack: "💥 被道具攻击！",
         shield: "🛡️ 护盾生效",
         laneChange: "↔️ 变道",
-        runoff: "😱 冲出赛道！",
         bump: "💢 撞车！",
         skillSprint: "⚡ 爆发冲刺！",
         skillFocus: "🧘 全神贯注",
@@ -451,7 +466,9 @@
       const x = ev.pos ?? 0;
       bubble.style.left = x + "%";
       const bubbleLane =
-        ev.type === "laneChange" ? (ev.lane ?? ev.deerIndex) : ev.deerIndex;
+        ev.type === "laneChange"
+          ? (ev.lane ?? view.laneOf[ev.deerIndex] ?? 0)
+          : (view.laneOf[ev.deerIndex] ?? 0);
       bubble.style.top = laneCenter(bubbleLane) - 5 + "%";
       setTimeout(() => bubble.remove(), 2300);
 
@@ -465,7 +482,6 @@
         boost: "deer-boost",
         attack: "deer-stun",
         shield: "deer-shield",
-        runoff: "deer-runoff",
         bump: "deer-bump",
         skillSprint: "deer-boost",
         momentum: "deer-boost",
@@ -483,24 +499,10 @@
           "deer-boost",
           "deer-stun",
           "deer-shield",
-          "deer-runoff",
           "deer-bump",
         );
-        // 中招动画（掉洞/撞障碍/吃草/冲出赛道/踩石子）：先把鹿瞬间定位到事件点再播动画，
-        // 否则 transition 滞后 + 步进超调会让鹿视觉上冲过物件（右侧）才触发
-        if (
-          ev.type === "hole" ||
-          ev.type === "obstacle" ||
-          ev.type === "graze" ||
-          ev.type === "runoff" ||
-          ev.type === "pebble"
-        ) {
-          const wasTransition = el.style.transition;
-          el.style.transition = "none";
-          placeDeer(el, ev.pos, view.laneOf[ev.deerIndex] ?? ev.deerIndex);
-          void el.offsetWidth; // 强制重排，让定位立即生效
-          el.style.transition = wasTransition;
-        }
+        // 事件在服务器判定点产生并整体转播（不再平移到物体正上方）：
+        // 中招动画直接在判定点播放，无需先 snap 定位
         void el.offsetWidth; // 强制重绘以重启动画
         el.classList.add(cls);
         setTimeout(() => el.classList.remove(cls), 2300);
