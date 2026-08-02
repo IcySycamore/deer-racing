@@ -401,6 +401,17 @@ select.input-field option {
   font-weight: 700;
 }
 
+.bet-badge-trick {
+  background: linear-gradient(
+    90deg,
+    rgba(120, 220, 255, 0.18),
+    rgba(190, 140, 255, 0.18)
+  );
+  color: #7fd8ff;
+  border: 1px solid rgba(120, 220, 255, 0.35);
+  box-shadow: 0 0 8px rgba(120, 220, 255, 0.15);
+}
+
 /* ===== 标签页 ===== */
 .tabs {
   display: flex;
@@ -2169,6 +2180,135 @@ select.input-field option {
   flex: 1;
   min-width: 120px;
   width: 100%;
+}
+
+/* ===== 大厅公开房间列表 ===== */
+.lobby-roomlist {
+  margin-top: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.roomlist-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.roomlist-title {
+  font-weight: 900;
+  letter-spacing: 1px;
+}
+
+.roomlist-search {
+  max-width: 240px;
+  padding: 8px 12px;
+}
+
+.roomlist-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.roomlist-empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 18px;
+  font-size: 0.9em;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+.roomlist-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.15);
+  transition: border-color 0.18s;
+}
+
+.roomlist-item:hover {
+  border-color: rgba(63, 191, 127, 0.5);
+}
+
+.roomlist-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.roomlist-name {
+  font-weight: 800;
+}
+
+.roomlist-meta {
+  font-size: 0.76em;
+  color: var(--muted);
+}
+
+.roomlist-side {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.roomlist-status {
+  font-size: 0.72em;
+  font-weight: 800;
+  padding: 2px 8px;
+  border-radius: 10px;
+}
+
+.roomlist-status.racing {
+  color: #ff9f6e;
+  background: rgba(255, 159, 110, 0.15);
+}
+
+/* 创建房间选项 */
+.create-option {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.create-option-label {
+  font-size: 0.85em;
+  font-weight: 700;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.create-option-hint {
+  font-size: 0.72em;
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.toggle-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.toggle-input {
+  width: 20px;
+  height: 20px;
+  accent-color: var(--gold);
+  cursor: pointer;
 }
 
 /* ===== 通用模态框 ===== */

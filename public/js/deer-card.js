@@ -110,7 +110,15 @@
     }
 
     // —— 徽章 ——
-    const badgeHtml = badges
+    const badges2 = [...badges];
+    // 特技徽章：拥有特技的鹿在卡片上展示（特技是稀有机制，突出显示）
+    if (d && d.trickName) {
+      badges2.push({
+        text: `${d.trickIcon || "✦"} ${d.trickName}`,
+        cls: "bet-badge-trick",
+      });
+    }
+    const badgeHtml = badges2
       .map((b) => `<div class="bet-badge ${b.cls || ""}">${b.text}</div>`)
       .join("");
 

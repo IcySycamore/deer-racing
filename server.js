@@ -130,6 +130,14 @@ function publicDeer(d) {
     antlerLeftMs: Math.max(0, antler.growUntil - Date.now()), // 鹿茸剩余成长毫秒（0 = 可收割）
     antlerGrowUntil: antler.growUntil || 0, // 绝对时间戳（客户端本地倒计时用）
     breedReady: !(d.breedCdUntil && d.breedCdUntil > Date.now()),
+    // 特技：key + 展示信息（客户端只读，不暴露属性）
+    trick: d.trick || null,
+    trickName: GameConfig.trickInfo(d.trick)
+      ? GameConfig.trickInfo(d.trick).name
+      : null,
+    trickIcon: GameConfig.trickInfo(d.trick)
+      ? GameConfig.trickInfo(d.trick).icon
+      : null,
   };
 }
 
@@ -185,6 +193,8 @@ function roomView(room) {
     name: room.name || room.roomId,
     host: room.host,
     hostName: room.hostName,
+    maxPlayers: room.maxPlayers || MAX_PLAYERS,
+    isPublic: room.isPublic !== false,
     raceType: room.raceType || "sprint",
     betCountdown: room.betCountdown || GameConfig.BET_COUNTDOWN,
     players: roster,
@@ -202,13 +212,19 @@ function roomView(room) {
 
 // 比赛公开状态：不暴露真实属性，只暴露参赛鹿的公开信息、赔率、投注池与赛道物件计划
 function publicRaceState(rs) {
+  // 赛道物件内部坐标是 0~TRACK_LEN，广播给前端统一归一化回 0~100
+  const sc = GameConfig.trackScale;
   return {
     type: rs.type,
     status: rs.status,
     odds: rs.odds,
     betPool: rs.betPool || {}, // 每只鹿的实时累计投注金额（动态赔率依据）
     finishOrder: rs.finishOrder,
-    trackObjects: rs.trackObjects || [],
+    trackObjects: (rs.trackObjects || []).map((o) => ({
+      ...o,
+      pos: GameConfig.trackScale(o.pos),
+      renderPos: GameConfig.trackScale(o.renderPos),
+    })),
     racers: rs.racers.map((r) => ({
       deer: publicDeer(r.deer),
       ownerId: r.ownerId,
@@ -292,6 +308,34 @@ function syncRoom(room, chatMsg) {
   if (chatMsg) pushChat(room, null, chatMsg);
 }
 
+// 大厅房间列表：公开房间（isPublic=true）出现在大厅列表，可被搜索/直接加入；
+// 私密房间（isPublic=false）不出现在列表，只能凭房间号加入。
+function roomListPublic() {
+  const list = [];
+  for (const r of Object.values(rooms)) {
+    if (r.isPublic === false) continue; // 私密房不进列表
+    const p = Object.values(r.players);
+    list.push({
+      roomId: r.roomId,
+      name: r.name || r.roomId,
+      hostName: r.hostName,
+      raceType: r.raceType || "sprint",
+      playerCount: p.length,
+      maxPlayers: r.maxPlayers || MAX_PLAYERS,
+      status:
+        r.raceState && r.raceState.status === "racing" ? "racing" : "waiting",
+    });
+  }
+  // 优先显示有人的房间，再按创建顺序
+  list.sort((a, b) => b.playerCount - a.playerCount);
+  return list;
+}
+
+// 广播房间列表给所有在线玩家（大厅用）
+function broadcastRoomList() {
+  io.emit("roomList", { rooms: roomListPublic() });
+}
+
 // 鹿名池与品质描述
 const NAMES = [
   "闪电",
@@ -368,6 +412,8 @@ function randomDeer(quality) {
     champWins: 0, // 夺冠次数（卖出时额外加价）
     antler: { growUntil: 0 }, // 鹿茸：0/已过 = 可收割，否则成长中
     breedCdUntil: 0, // 配种冷却
+    // 特技：按品质小概率获得一个（品质越高越稀有 0.01%~2%）
+    trick: GameConfig.rollTrick(quality),
   };
 }
 
@@ -414,16 +460,18 @@ function generateTrackObjects(type) {
   const objs = [];
   const isObstacle = type === "obstacle";
   const isSprint = type === "sprint";
-  let pos = 12;
-  while (pos < 86) {
-    // 间隔：障碍赛密集，短距赛稀疏
+  const T = GameConfig.TRACK_LEN; // 赛道总长（内部坐标）
+  const END = T - 14; // 物件最晚位置（留出终点缓冲）
+  let pos = T * 0.12;
+  while (pos < END) {
+    // 间隔：障碍赛密集，短距赛稀疏（按赛道长度比例缩放）
     const gap = isObstacle
-      ? 5 + Math.random() * 6
+      ? T * 0.05 + Math.random() * T * 0.06
       : isSprint
-        ? 10 + Math.random() * 8
-        : 7 + Math.random() * 9;
+        ? T * 0.1 + Math.random() * T * 0.08
+        : T * 0.07 + Math.random() * T * 0.09;
     pos += gap;
-    if (pos >= 86) break;
+    if (pos >= END) break;
     let t;
     const roll = Math.random();
     if (isObstacle) {
@@ -465,15 +513,14 @@ function generateTrackObjects(type) {
       }
     }
   }
-  // 道具点：随机 3 个（位置 25~80，随机车道），鹿踩到获得随机道具（加速/攻击/护盾）
-  const POWERUP_TYPES = ["powerup"];
+  // 道具点：随机 3 个（位置 25%~80%，随机车道），鹿踩到获得随机道具（加速/攻击/护盾）
   for (let k = 0; k < 3; k++) {
-    const p = 25 + Math.floor(Math.random() * 56);
+    const p = T * 0.25 + Math.floor(Math.random() * (T * 0.55));
     objs.push({
-      pos: p,
-      type: POWERUP_TYPES[0],
+      pos: Math.round(p),
+      type: "powerup",
       lane: Math.floor(Math.random() * LANES),
-      renderPos: p + RENDER_OFFSET,
+      renderPos: Math.round(p) + RENDER_OFFSET,
     });
   }
   return objs;
@@ -540,45 +587,57 @@ function settleBet(bet, finishDeerIds, odds, racers) {
 io.on("connection", (socket) => {
   console.log("玩家连接:", socket.id);
   let currentRoom = null;
-  // 连接即推送一次出租市场快照（大厅面板初始化显示）+ 全服聊天历史
+  // 连接即推送一次出租市场快照（大厅面板初始化显示）+ 全服聊天历史 + 房间列表
   socket.emit("rentalMarketUpdate", { items: rentalMarketPublicItems() });
   socket.emit("globalChatHistory", [...globalChat]);
+  socket.emit("roomList", { rooms: roomListPublic() });
 
   // 创建房间（需登录账号）
-  socket.on("createRoom", ({ playerName, roomName, username, password }) => {
-    const roomId = Math.random().toString(36).substr(2, 6).toUpperCase();
-    // 匿名账号不允许创建房间
-    if (!ensureAccount(socket, username, password)) {
-      socket.emit("error", "请先登录账号再创建房间");
-      return;
-    }
-    rooms[roomId] = {
-      roomId,
-      name: roomName || `${playerName || "鹿主"}的房间`,
-      host: socket.id,
-      hostName: playerName || "鹿主",
-      raceType: "sprint",
-      players: {},
-      raceState: null,
-      shop: generateShop(),
-      shopRefreshesAt: Date.now() + SHOP_REFRESH_MS,
-      manualRefreshCount: 0,
-      chatHistory: [],
-      lastUpdate: Date.now(),
-    };
-    socket.join(roomId);
-    currentRoom = roomId;
-    const player = buildPlayer(socket.id, playerName || "鹿主", 1000, true);
-    // 如果提供了账号信息则登录并应用
-    if (username && tryBindAccount(socket, player, username, password).ok) {
-      // 房主昵称以账号持久化昵称为准
-      rooms[roomId].hostName = player.name;
-    }
-    rooms[roomId].players[socket.id] = player;
-    broadcastViews(rooms[roomId]);
-    pushChat(rooms[roomId], null, `${player.name} 创建了房间`);
-    console.log(`房间 ${roomId} 创建，房主: ${socket.id}`);
-  });
+  socket.on(
+    "createRoom",
+    ({ playerName, roomName, username, password, maxPlayers, isPublic }) => {
+      const roomId = Math.random().toString(36).substr(2, 6).toUpperCase();
+      // 匿名账号不允许创建房间
+      if (!ensureAccount(socket, username, password)) {
+        socket.emit("error", "请先登录账号再创建房间");
+        return;
+      }
+      // 房间人数：默认最大跑道数（6），范围 2~MAX_PLAYERS
+      const maxP =
+        Number(maxPlayers) >= 2 && Number(maxPlayers) <= MAX_PLAYERS
+          ? Math.floor(Number(maxPlayers))
+          : MAX_PLAYERS;
+      rooms[roomId] = {
+        roomId,
+        name: roomName || `${playerName || "鹿主"}的房间`,
+        host: socket.id,
+        hostName: playerName || "鹿主",
+        raceType: "sprint",
+        maxPlayers: maxP,
+        isPublic: isPublic !== false, // 默认公开，false = 仅可凭房间号加入
+        players: {},
+        raceState: null,
+        shop: generateShop(),
+        shopRefreshesAt: Date.now() + SHOP_REFRESH_MS,
+        manualRefreshCount: 0,
+        chatHistory: [],
+        lastUpdate: Date.now(),
+      };
+      socket.join(roomId);
+      currentRoom = roomId;
+      const player = buildPlayer(socket.id, playerName || "鹿主", 1000, true);
+      // 如果提供了账号信息则登录并应用
+      if (username && tryBindAccount(socket, player, username, password).ok) {
+        // 房主昵称以账号持久化昵称为准
+        rooms[roomId].hostName = player.name;
+      }
+      rooms[roomId].players[socket.id] = player;
+      broadcastViews(rooms[roomId]);
+      pushChat(rooms[roomId], null, `${player.name} 创建了房间`);
+      broadcastRoomList();
+      console.log(`房间 ${roomId} 创建，房主: ${socket.id}`);
+    },
+  );
 
   // 加入房间（需登录账号）
   socket.on("joinRoom", ({ roomId, playerName, username, password }) => {
@@ -592,9 +651,10 @@ io.on("connection", (socket) => {
       socket.emit("error", "请先登录账号再加入房间");
       return;
     }
-    // 房间满员：拒绝加入（最多 MAX_PLAYERS 人，与跑道数一致）
-    if (Object.keys(rooms[roomId].players).length >= MAX_PLAYERS) {
-      socket.emit("error", `房间已满（最多 ${MAX_PLAYERS} 人），无法加入`);
+    // 房间满员：拒绝加入（最多 room.maxPlayers 人，默认与跑道数一致）
+    const maxP = rooms[roomId].maxPlayers || MAX_PLAYERS;
+    if (Object.keys(rooms[roomId].players).length >= maxP) {
+      socket.emit("error", `房间已满（最多 ${maxP} 人），无法加入`);
       return;
     }
     socket.join(roomId);
@@ -605,6 +665,7 @@ io.on("connection", (socket) => {
     rooms[roomId].players[socket.id] = player;
     broadcastViews(rooms[roomId]);
     pushChat(rooms[roomId], null, `${player.name} 加入了房间`);
+    broadcastRoomList();
   });
 
   // 注册 / 登录：成功都绑定账号身份（改名/持久化依赖 socket.data.account）
@@ -983,9 +1044,27 @@ io.on("connection", (socket) => {
       if (deer) racers.push({ deer, ownerId: p.id });
     }
     // 至少 6 只参赛，不足用随机 AI 补齐（挂出出租市场的鹿不会被自动拉进比赛）
+    // 需求：AI 鹿的品质尽量贴近参赛玩家鹿的平均品质（避免悬殊碾压/被碾压）
+    // 依据玩家鹿平均品质，把 AI 品质限制在 ±1 的窄区间内
+    let aiQ = 3; // 默认中等
+    if (racers.length > 0) {
+      let sum = 0;
+      let n = 0;
+      for (const r of racers) {
+        if (!r.ownerId) continue; // 只统计玩家鹿
+        sum += r.deer.quality;
+        n++;
+      }
+      if (n > 0) {
+        const avg = Math.round(sum / n);
+        // AI 品质 = 玩家平均 ±1（clamp 到 1~5），波动小、差距缩小
+        const offset = Math.floor(Math.random() * 3) - 1; // -1 ~ +1
+        aiQ = Math.max(1, Math.min(5, avg + offset));
+      }
+    }
     const aiCount = Math.max(6 - racers.length, 0);
     for (let i = 0; i < aiCount; i++) {
-      const aiDeer = randomDeer(Math.floor(Math.random() * 4) + 1);
+      const aiDeer = randomDeer(aiQ);
       racers.push({ deer: aiDeer, ownerId: null });
     }
     // 计算隐藏赔率 (基于服务器真实属性 + 比赛类型权重，客户端不可见)
@@ -1395,6 +1474,8 @@ io.on("connection", (socket) => {
       breedCdUntil: 0,
       isFawn: true, // 小鹿：喂养 3 次后成年
       fed: 0,
+      // 特技：配种小鹿也按品质 roll（继承父母特技的小几率提高，由品质决定）
+      trick: GameConfig.rollTrick(q),
     };
     player.deers.push(child);
     Account.syncFromPlayer(player);
@@ -1593,6 +1674,7 @@ function removePlayerFromRoom(socketId, roomId) {
         io.emit("raceCanceled", { roomId });
       }
       delete rooms[roomId];
+      broadcastRoomList(); // 大厅房间列表同步移除
       return;
     }
     room.host = remaining[0];
@@ -1601,6 +1683,7 @@ function removePlayerFromRoom(socketId, roomId) {
   } else {
     syncRoom(room, `🚪 ${leftName} 离开了房间`);
   }
+  broadcastRoomList(); // 人数变化，同步大厅房间列表
 }
 
 // 商店自动刷新：到点整批换新并重置手动刷新花费；每秒向房间广播刷新倒计时与花费
@@ -1641,9 +1724,16 @@ function startRaceSimulation(room, roomId) {
       return;
     }
     // 推进一步，拿到本步事件流并广播（时钟与广播是引擎的 adapter）
+    // 位置在引擎内是 0~TRACK_LEN，广播给前端时统一归一化回 0~100
     const events = stepRace(race);
-    for (const ev of events) io.emit("raceEvent", { roomId, ...ev });
-    io.emit("racePositions", { roomId, positions: race.positions });
+    for (const ev of events) {
+      if (typeof ev.pos === "number") ev.pos = GameConfig.trackScale(ev.pos);
+      io.emit("raceEvent", { roomId, ...ev });
+    }
+    io.emit("racePositions", {
+      roomId,
+      positions: race.positions.map((p) => GameConfig.trackScale(p)),
+    });
     if (race.done) {
       clearInterval(interval);
       room.raceState.finishOrder = race.finishOrder;

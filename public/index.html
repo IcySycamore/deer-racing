@@ -101,6 +101,22 @@
             <span class="big-sub">输入房间ID，加入比赛</span>
           </button>
         </div>
+
+        <!-- 公开房间列表：支持按名称/房主搜索 -->
+        <div class="card lobby-roomlist">
+          <div class="roomlist-head">
+            <span class="roomlist-title">🛖 公开房间</span>
+            <input
+              class="input-field roomlist-search"
+              id="roomListSearch"
+              placeholder="搜索房间名 / 房主"
+              oninput="renderRoomList()"
+            />
+          </div>
+          <div class="roomlist-body" id="roomListBody">
+            <div class="roomlist-empty">暂无公开房间，点击上方「创建房间」开始</div>
+          </div>
+        </div>
       </div>
 
       <!-- ===== 房间界面（创建/加入后）===== -->
@@ -548,7 +564,8 @@
           <button class="btn" onclick="changePassword()">修改密码</button>
         </div>
         <div class="id-line">
-          我的ID: <b id="myPlayerId" class="my-id" onclick="copyMyId()">-</b>
+          本次登录ID:
+          <b id="myPlayerId" class="my-id" onclick="copyMyId()">-</b>
         </div>
         <button
           class="btn btn-danger btn-block"
@@ -577,6 +594,29 @@
           placeholder="房间名（可留空）"
           maxlength="16"
         />
+        <!-- 房间人数设置：2 ~ 最大跑道数 -->
+        <label class="create-option">
+          <span class="create-option-label">房间人数</span>
+          <select class="input-field modal-input" id="newRoomMaxPlayers">
+            <option value="2">2 人</option>
+            <option value="3">3 人</option>
+            <option value="4">4 人</option>
+            <option value="5">5 人</option>
+            <option value="6" selected>6 人</option>
+          </select>
+        </label>
+        <!-- 公开/私密开关：公开房进大厅列表，私密房仅凭房间号加入 -->
+        <label class="create-option toggle-row">
+          <span class="create-option-label">
+            公开房间
+          </span>
+          <input
+            type="checkbox"
+            class="toggle-input"
+            id="newRoomIsPublic"
+            checked
+          />
+        </label>
         <button class="btn btn-gold btn-block" onclick="createRoom()">
           创建房间
         </button>

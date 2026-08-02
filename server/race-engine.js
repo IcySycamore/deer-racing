@@ -12,6 +12,26 @@ const GameConfig = require(
 
 const TOTAL_STEPS = 300; // 安全上限（约24秒），正常会提前结束
 
+// 特技效果参数（读 GameConfig.TRICKS）
+const TRICK = {
+  startBoostSteps: 25, // 疾风起跑：前 25 步加速
+  fatigueMul: 0.6, // 耐力冠军：体力消耗 × 0.6
+  jumpBoost: 0.12, // 障碍大师：跳跃/躲避判定概率 +0.12
+  lateThreshold: 0.5, // 爆发冲刺：过半程后加速
+  itemDurationMul: 1.5, // 道具亲和：道具效果时长 × 1.5
+
+  // 创建比赛时把鹿的特技 key 映射进 eventState
+  applyToEventState: function (deer, es) {
+    const info = GameConfig.trickInfo(deer && deer.trick);
+    es.trick = deer && deer.trick ? deer.trick : null;
+    es.trickEffect = info ? info.effect : null;
+    es.hasStartBoost =
+      es.trickEffect === "startBoost" ||
+      es.trickEffect === "sprint" ||
+      es.trickEffect === "item";
+  },
+};
+
 // 创建比赛状态
 function createRace(racers, type, trackObjects) {
   return {
@@ -25,28 +45,32 @@ function createRace(racers, type, trackObjects) {
     // 状态机：normal(正常跑) -> 在判定点 pos 判定：
     //   - 判定为"会躲过"：jumping（立即跳起，跨过物件后恢复）
     //   - 判定为"会中招"：approach（以原速/1.5倍速冲向物件）-> inObject（触发动画）
-    eventState: racers.map((r, i) => ({
-      state: "normal", // normal | approach | jumping | inObject
-      obj: null, // approach 阶段冲向的物件
-      until: 0, // inObject 结束的 step
-      jumpEnd: 0, // jumping 结束的位置
-      mult: 1,
-      nextObj: 0, // 下一个待判定的赛道物件索引
-      lane: i, // 当前车道（换道事件会改变；物件按此车道过滤）
-      // 道具状态
-      boostUntil: 0, // 加速结束的 step
-      shield: false, // 护盾：下一次物件判定必定躲过/不吃草，然后消耗
-      attackUntil: 0, // 被攻击眩晕结束的 step
-      attackMult: 1, // 被攻击期间的倍速
-      laneChangeUntil: 0, // 换道动画结束的 step（期间不再触发换道/冲出）
-      // 技能系统（内置 CD：触发后冷却若干步，期间不再触发）
-      skillCd: 0, // 技能冷却计数（每步递减）
-      sprintUntil: 0, // 爆发冲刺结束的 step
-      focusNext: false, // 专注：下一个物件判定必定躲过（然后消耗）
-      // 随机事件
-      momentumUntil: 0, // 状态火热结束的 step
-      pebbleUntil: 0, // 踩到石子结束的 step
-    })),
+    eventState: racers.map((r, i) => {
+      const es = {
+        state: "normal", // normal | approach | jumping | inObject
+        obj: null, // approach 阶段冲向的物件
+        until: 0, // inObject 结束的 step
+        jumpEnd: 0, // jumping 结束的位置
+        mult: 1,
+        nextObj: 0, // 下一个待判定的赛道物件索引
+        lane: i, // 当前车道（换道事件会改变；物件按此车道过滤）
+        // 道具状态
+        boostUntil: 0, // 加速结束的 step
+        shield: false, // 护盾：下一次物件判定必定躲过/不吃草，然后消耗
+        attackUntil: 0, // 被攻击眩晕结束的 step
+        attackMult: 1, // 被攻击期间的倍速
+        laneChangeUntil: 0, // 换道动画结束的 step（期间不再触发换道/冲出）
+        // 技能系统（内置 CD：触发后冷却若干步，期间不再触发）
+        skillCd: 0, // 技能冷却计数（每步递减）
+        sprintUntil: 0, // 爆发冲刺结束的 step
+        focusNext: false, // 专注：下一个物件判定必定躲过（然后消耗）
+        // 随机事件
+        momentumUntil: 0, // 状态火热结束的 step
+        pebbleUntil: 0, // 踩到石子结束的 step
+      };
+      TRICK.applyToEventState(r.deer, es);
+      return es;
+    }),
     step: 0,
     done: false,
   };
@@ -83,9 +107,17 @@ function stepRace(race) {
     base += Math.random() * 0.1; // 保底随机
     // 2) 起跑反应：前 12 步敏捷加成（线性消退）—— 敏捷高的鹿起步快
     base += Math.max(0, 1 - race.step / 12) * agility * 0.18;
+    // 2.5) 特技·疾风起跑：前 N 步额外爆发加速
+    if (es.trickEffect === "startBoost" && race.step <= TRICK.startBoostSteps) {
+      base += 0.22 * (1 - race.step / (TRICK.startBoostSteps * 2));
+    }
     // 3) 体力：疲劳随赛程累积，与耐力成反比 —— 耐力低的鹿后段明显掉速
     //    fatigue 每步增量 = 0.005 - stamina*0.0035（耐力 0→1 时 0.005→0.0015）
-    es.fatigue = (es.fatigue || 0) + (0.005 - stamina * 0.0035);
+    //    特技·耐力冠军：体力消耗 ×0.6，后程更稳
+    const fatigueInc = 0.005 - stamina * 0.0035;
+    es.fatigue =
+      (es.fatigue || 0) +
+      fatigueInc * (es.trickEffect === "fatigueReduce" ? TRICK.fatigueMul : 1);
     const staminaMul = 1 - Math.min(1, es.fatigue) * 0.45;
     // 4) 稳定性：随机波动幅度与敏捷成反比 —— 敏捷高的鹿发挥更稳定
     //    随机占比加大（0.12→0.2），防止低赔率鹿被稳定预测一直赢
@@ -99,6 +131,13 @@ function stepRace(race) {
     if (race.step < es.attackUntil) speedFactor *= es.attackMult;
     // 8) 技能效果（带内置 CD，见 normal 状态技能触发）
     if (race.step < es.sprintUntil) speedFactor += 0.25; // 爆发冲刺
+    // 8.5) 特技·爆发冲刺：过半程后再加速
+    if (
+      es.trickEffect === "lateSprint" &&
+      race.positions[i] > GameConfig.TRACK_LEN * TRICK.lateThreshold
+    ) {
+      speedFactor += 0.18;
+    }
     // 9) 随机事件效果
     if (race.step < es.momentumUntil) speedFactor += 0.3; // 状态火热
     if (race.step < es.pebbleUntil) speedFactor *= 0.7; // 踩到石子
@@ -211,7 +250,7 @@ function stepRace(race) {
       } else if (
         race.step > 8 &&
         race.step >= es.laneChangeUntil &&
-        race.positions[i] < 90 &&
+        race.positions[i] < GameConfig.TRACK_LEN * 0.9 &&
         Math.random() < 0.02
       ) {
         // 换道：随机变到相邻车道（物件按新车道过滤；可能撞到旁边鹿）
@@ -253,8 +292,8 @@ function stepRace(race) {
           }
         }
       } else if (
-        race.positions[i] > 30 &&
-        race.positions[i] < 90 &&
+        race.positions[i] > GameConfig.TRACK_LEN * 0.3 &&
+        race.positions[i] < GameConfig.TRACK_LEN * 0.9 &&
         race.step >= es.laneChangeUntil &&
         Math.random() < 0.012
       ) {
@@ -280,10 +319,13 @@ function stepRace(race) {
           const rp = obj.renderPos || obj.pos;
           if (obj.type === "powerup") {
             // 拾取道具：随机获得 加速 / 攻击 / 护盾
+            // 特技·道具亲和：所有道具效果时长 ×1.5
+            const durMul =
+              es.trickEffect === "itemDuration" ? TRICK.itemDurationMul : 1;
             const roll = Math.random();
             if (roll < 0.34) {
-              // 加速
-              es.boostUntil = race.step + 45;
+              // 加速（加长显示/持续时间）
+              es.boostUntil = race.step + Math.round(60 * durMul);
               events.push({
                 type: "boost",
                 deerIndex: i,
@@ -302,7 +344,8 @@ function stepRace(race) {
                 }
               }
               if (target >= 0) {
-                race.eventState[target].attackUntil = race.step + 16;
+                race.eventState[target].attackUntil =
+                  race.step + Math.round(22 * durMul);
                 race.eventState[target].attackMult = 0.35;
                 events.push({
                   type: "attack",
@@ -317,7 +360,7 @@ function stepRace(race) {
                 });
               } else {
                 // 没有可攻击对象：转为加速
-                es.boostUntil = race.step + 30;
+                es.boostUntil = race.step + Math.round(40 * durMul);
                 events.push({
                   type: "boost",
                   deerIndex: i,
@@ -325,8 +368,9 @@ function stepRace(race) {
                 });
               }
             } else {
-              // 护盾：下一次物件判定必定躲过/不吃草
+              // 护盾：下一次物件判定必定躲过/不吃草（加长显示时间）
               es.shield = true;
+              es.shieldUntil = race.step + Math.round(50 * durMul);
               events.push({
                 type: "shield",
                 deerIndex: i,
@@ -335,6 +379,11 @@ function stepRace(race) {
             }
           } else if (obj.type === "hole") {
             // 洞：护盾/专注必定跳过；否则按敏捷判定（随机占比加大，防低赔率稳赢）
+            // 特技·障碍大师：跳跃判定概率 +0.12
+            const jumpBoost =
+              es.trickEffect === "obstacle" ? TRICK.jumpBoost : 0;
+            // 护盾随时间过期（特技·道具亲和加长显示时间）
+            if (es.shield && race.step >= es.shieldUntil) es.shield = false;
             const hasShield = es.shield;
             if (hasShield) es.shield = false;
             const hasFocus = es.focusNext;
@@ -342,7 +391,10 @@ function stepRace(race) {
             const jumpP =
               hasShield || hasFocus
                 ? 1
-                : 0.3 + (d.agility / 100) * 0.25 + Math.random() * 0.25;
+                : 0.3 +
+                  (d.agility / 100) * 0.25 +
+                  jumpBoost +
+                  Math.random() * 0.25;
             if (Math.random() < jumpP) {
               // 会躲过：在判定点跳起，跨过物件（物件在 renderPos）
               // 钳制起跳位置到判定点，跳跃跨度 = rp + JUDGE_X - obj.pos < 最小间隔
@@ -363,6 +415,10 @@ function stepRace(race) {
             }
           } else if (obj.type === "obstacle") {
             // 障碍：护盾/专注必定跳过；否则按敏捷判定
+            // 特技·障碍大师：跳跃判定概率 +0.12
+            const jumpBoost =
+              es.trickEffect === "obstacle" ? TRICK.jumpBoost : 0;
+            if (es.shield && race.step >= es.shieldUntil) es.shield = false;
             const hasShield = es.shield;
             if (hasShield) es.shield = false;
             const hasFocus = es.focusNext;
@@ -370,7 +426,10 @@ function stepRace(race) {
             const jumpP =
               hasShield || hasFocus
                 ? 1
-                : 0.35 + (d.agility / 100) * 0.3 + Math.random() * 0.25;
+                : 0.35 +
+                  (d.agility / 100) * 0.3 +
+                  jumpBoost +
+                  Math.random() * 0.25;
             if (Math.random() < jumpP) {
               race.positions[i] = obj.pos;
               es.state = "jumping";
@@ -388,6 +447,7 @@ function stepRace(race) {
             }
           } else if (obj.type === "grass") {
             // 草：护盾/专注免疫吃草；否则体力越低越容易停下吃草
+            if (es.shield && race.step >= es.shieldUntil) es.shield = false;
             const hasShield = es.shield;
             if (hasShield) es.shield = false;
             const hasFocus = es.focusNext;
@@ -410,8 +470,8 @@ function stepRace(race) {
     speedFactor *= es.mult;
     // 速度修复：放大步进，保证属性普通的鹿也能跑完全程
     race.positions[i] += Math.max(0, speedFactor * 2.0);
-    if (race.positions[i] >= 100 && !race.finished[i]) {
-      race.positions[i] = 100;
+    if (race.positions[i] >= GameConfig.TRACK_LEN && !race.finished[i]) {
+      race.positions[i] = GameConfig.TRACK_LEN;
       race.finished[i] = true;
       race.finishOrder.push(i);
     }

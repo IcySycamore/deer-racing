@@ -22,6 +22,13 @@
     RENDER_OFFSET: 3,
     // 跳跃落点余量（起跳 pos -> 落地 renderPos + JUDGE_X，跨度必须 < 物件最小间隔）
     JUDGE_X: 1,
+    // 赛道总长度（内部逻辑单位，0 ~ TRACK_LEN）。加大后比赛更久、物件分布更开。
+    // 广播给前端时统一归一化到 0-100（live-view 渲染假设 0-100，无需改动）。
+    TRACK_LEN: 125,
+    // 将内部赛道坐标(0~TRACK_LEN)归一化为前端坐标(0~100)的系数
+    trackScale: function (v) {
+      return (v * 100) / this.TRACK_LEN;
+    },
 
     // 投注玩法：类型 -> 选几只鹿 + 中奖赔率倍率
     // 结算规则统一为：组合赔率均值 × mult（win/place 是单鹿，均值即该鹿赔率）
@@ -49,6 +56,62 @@
     // 每场比赛后的衰减比例：上限衰减大、当前属性衰减小
     RACE_CAP_DECAY: 0.015, // 属性上限每次 -1.5%
     RACE_ATTR_DECAY: 0.005, // 当前属性每次 -0.5%
+
+    // ===== 特技机制 =====
+    // 商店/配种出生的鹿按品质获得一个特技的概率（品质越高越稀有，0.01%~2%）
+    // 品质 1 → 0.01% · 2 → 0.05% · 3 → 0.2% · 4 → 0.8% · 5 → 2%
+    TRICK_CHANCES: {
+      1: 0.0001,
+      2: 0.0005,
+      3: 0.002,
+      4: 0.008,
+      5: 0.02,
+    },
+    // 特技池：每头鹿最多一个特技，比赛引擎中按特技生效
+    // effect 是给比赛引擎读的 key，前端只展示 name/desc/icon
+    TRICKS: {
+      swift: {
+        name: "疾风起跑",
+        icon: "🌪️",
+        desc: "起跑阶段爆发加速，开局领先",
+        effect: "startBoost",
+      },
+      endurance: {
+        name: "耐力冠军",
+        icon: "🛡️",
+        desc: "体力消耗大幅降低，后程不掉速",
+        effect: "fatigueReduce",
+      },
+      obstacle: {
+        name: "障碍大师",
+        icon: "🚀",
+        desc: "跳跃判定概率提升，更易跨过障碍",
+        effect: "jumpBoost",
+      },
+      sprint: {
+        name: "爆发冲刺",
+        icon: "⚡",
+        desc: "赛程后半段再次加速冲刺",
+        effect: "lateSprint",
+      },
+      item: {
+        name: "道具亲和",
+        icon: "🍀",
+        desc: "拾取道具效果持续时间延长",
+        effect: "itemDuration",
+      },
+    },
+    // 按品质 roll 是否获得特技
+    rollTrick: function (quality) {
+      const chance = this.TRICK_CHANCES[quality] || 0;
+      if (Math.random() >= chance) return null;
+      const keys = Object.keys(this.TRICKS);
+      return keys[Math.floor(Math.random() * keys.length)];
+    },
+    // 特技查询（key -> {name,icon,desc,effect}），不存在返回 null
+    trickInfo: function (key) {
+      return key ? this.TRICKS[key] || null : null;
+    },
 
     // ===== 鹿茸 =====
     // 收割后需成长 ANTLER_GROW_MS 才能再次收割；价值 = 品质×ANTLER_BASE + 随机(0~ANTLER_RAND)
